@@ -18,6 +18,8 @@ Copy this ID; the bot will use it to know where to send the price alerts.
 
 3. Configure the Bot
 Open eth_bot.py and replace the placeholders with your actual credentials
-Please note, the code in repository is the first part of analyst bot, it is working, so dont hesitate to use it for your own needs, or connect with my existing bot on Telegram: @Eth_priceUpdate_bot.
+
+5. Please note, the code in repository is the first part of analyst bot, it is working, so dont hesitate to use it for your own needs, or connect with my existing bot on Telegram: @Eth_priceUpdate_bot.
 Use /start to initiate the bot.
-The second part is coming soon!
+
+6. The second part is coming soon!
