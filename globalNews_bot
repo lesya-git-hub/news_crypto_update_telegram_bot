@@ -1,0 +1,171 @@
+import requests
+import telebot
+import time
+import threading
+import schedule
+import feedparser # для чтения ирландских новостей Met Eireann
+from newsapi import NewsApiClient
+
+TOKEN = "*********"
+CHAT_ID = "********"
+THRESHOLD = 0.01
+COINS = ['ethereum', 'bitcoin', 'solana', 'binancecoin', 'cardano', 'ripple']
+last_prices = {coin: None for coin in COINS}
+
+bot = telebot.TeleBot(TOKEN)
+
+def get_prices():
+    """Fetches current prices and 24h percentage change"""
+    ids = ",".join(COINS)
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=eur&include_24hr_change=true"
+    response = requests.get(url)
+    return response.json()
+
+@bot.message_handler(commands=['help', 'start'])
+def send_help(message):
+    help_text = (
+        "🤖 **Crypto Analyst Bot Commands:**\n\n"
+        "📈 `/status` - Show current prices for all coins\n"
+        "🏆 `/top` - Rank coins by 24h performance\n"
+        "⏰ *Daily Summary* - Sent automatically at 08:00\n"
+        "📢 *Alerts* - I'll notify you if a coin moves > 1%"
+    )
+    bot.reply_to(message, help_text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['top'])
+def send_top(message):
+    try:
+        data = get_prices()
+        # Sort coins by the 24h change percentage (descending)
+        sorted_coins = sorted(
+            COINS,
+            key=lambda x: data[x].get('eur_24h_change', 0),
+            reverse=True
+        )
+
+        text = "🏆 **24h Performance Ranking:**\n\n"
+        for i, coin in enumerate(sorted_coins, 1):
+            change = round(data[coin]['eur_24h_change'], 2)
+            emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔹"
+            text += f"{emoji} {coin.capitalize()}: {change}%\n"
+
+        bot.reply_to(message, text, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        bot.reply_to(message, "❌ Could not rank coins right now.")
+
+
+def send_daily_summary():
+    """Function to send a report once a day"""
+    try:
+        data = get_prices()
+        summary = "☕ **Good Morning! Your Daily Crypto Report:**\n\n"
+        for coin in COINS:
+            price = data[coin]['eur']
+            change_24h = round(data[coin]['eur_24h_change'], 2)
+            emoji = "🟢" if change_24h > 0 else "🔴"
+            summary += f"{emoji} {coin.capitalize()}: {price} EUR ({change_24h}% 24h)\n"
+
+        bot.send_message(CHAT_ID, summary, parse_mode="Markdown")
+        print("Daily summary sent!")
+    except Exception as e:
+        print(f"Error sending summary: {e}")
+
+
+def price_tracker():
+    print("Multi-coin analyst started...")
+    while True:
+        try:
+            data = get_prices()
+            for coin in COINS:
+                current_price = data[coin]['eur']
+                if last_prices[coin] is None:
+                    last_prices[coin] = current_price
+                    continue
+
+                change = (current_price - last_prices[coin]) / last_prices[coin]
+
+                if abs(change) >= THRESHOLD:
+                    direction = "📈" if change > 0 else "📉"
+                    percent = round(change * 100, 2)
+                    msg = f"{direction} **{coin.upper()}** {percent}%\nPrice: {current_price} EUR"
+                    bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+                    last_prices[coin] = current_price
+
+            time.sleep(600)
+        except Exception as e:
+            print(f"Tracker Error: {e}")
+            time.sleep(60)
+
+@bot.message_handler(commands=['status'])
+def send_status(message):
+    try:
+        data = get_prices()
+        text = "📊 **Current Prices:**\n"
+        for coin in COINS:
+            p = data[coin]['eur']
+            text += f"• {coin.capitalize()}: {p} EUR\n"
+        bot.reply_to(message, text, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        bot.reply_to(message, "Error fetching data.")
+
+NEWS_API_KEY = "**********"
+newsapi = NewsApiClient(api_key=NEWS_API_KEY)
+
+def get_world_news():
+    # Берем топ-10 мировых заголовков на английском
+    top_headlines = newsapi.get_top_headlines(language='en', page_size=10)
+    titles = [art['title'] for art in top_headlines['articles']]
+    return titles
+
+def get_earthquakes():
+    # Запрос к USGS: землетрясения за последние 24 часа магнитудой 5.0+
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=5"
+    resp = requests.get(url).json()
+    quakes = []
+    for feature in resp['features'][:3]: # возьмем топ-3 самых сильных
+        place = feature['properties']['place']
+        mag = feature['properties']['mag']
+        quakes.append(f"🌍 Землетрясение: {place} (M {mag})")
+    return quakes
+
+def get_ireland_alerts():
+    # Читаем RSS фид погодных предупреждений Ирландии
+    feed = feedparser.parse("https://www.met.ie/warningsxml/rss.xml")
+    alerts = []
+    if feed.entries:
+        for entry in feed.entries[:2]:
+            alerts.append(f"🇮🇪 Ireland Alert: {entry.title}")
+    else:
+        alerts.append("🇮🇪 В Ирландии всё спокойно.")
+    return alerts
+
+def send_evening_summary(bot, chat_id):
+    news = get_world_news()
+    quakes = get_earthquakes()
+    ireland = get_ireland_alerts()
+
+    report = "📜 **ИТОГИ ДНЯ: GLOBAL INTELLIGENCE**\n\n"
+    report += "🔝 **ТОП 10 НОВОСТЕЙ:**\n" + "\n".join([f"- {n}" for n in news]) + "\n\n"
+    report += "🌋 **КЛИМАТ (ЗЕМЛЕТРЯСЕНИЯ 5.0+):**\n" + "\n".join(quakes) + "\n\n"
+    report += "🌊 **ИРЛАНДИЯ И ВОДА:**\n" + "\n".join(ireland)
+
+    bot.send_message(chat_id, report)
+
+
+def run_scheduler():
+    """Background thread for the clock"""
+    # Change '08:00' to whatever time you want the report
+    schedule.every().day.at("08:00").do(send_daily_summary)
+    schedule.every().day.at("21:00").do(send_evening_summary)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+if __name__ == "__main__":
+    threading.Thread(target=run_scheduler, daemon=True).start()
+    threading.Thread(target=price_tracker, daemon=True).start()
+    print("All systems running with /top command active...")
+    bot.infinity_polling()
